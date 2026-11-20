@@ -1,0 +1,90 @@
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: ./containers/nginx/Dockerfile
+    ports:
+      - "${HOST_HTTP_PORT}:80"
+    depends_on:
+      - node
+    networks:
+      - app-network
+  
+  node:
+    build:
+      context: .
+      dockerfile: ./containers/node/Dockerfile
+    tty: true         # Keeps the container running in the background
+    stdin_open: true  # Allows interactive terminal attachment
+    volumes:
+      - ./app:/var/www/html
+      - /var/www/html/node_modules # Anonymous volume to prevent host/container OS binary conflicts
+      # Anonymous volumes are primarily used to isolate OS-specific binaries
+      # and improve I/O performance, though they actually do persist across a
+      # standard "docker compose down". However if you run "docker compose down -v"
+      # with "-v" flag this will wipe anonymous volumes, which also wipes
+      # "mariadbdata" database volume.
+    ports:
+      - "3000:3000" # Main NodeJS application port
+      - "35729:35729" # Grunt LiveReload (grunt-contrib-watch)
+      - "5173:5173" # Vite/Frontend dev server
+      - "9229:9229" # NodeJS debugger port
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - mariadb
+    networks:
+      - app-network
+
+  mariadb:
+    image: mariadb:latest
+    volumes:
+      - mariadbdata:/var/lib/mysql # Persistent database storage
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    networks:
+      - app-network
+
+  adminer:
+    image: adminer:latest
+    restart: always
+    environment:
+      ADMINER_DEFAULT_SERVER: mariadb
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+    depends_on:
+      - mariadb
+
+  mailpit:
+    image: axllent/mailpit:latest
+    logging:
+      driver: 'none' # Disable saving logs
+    ports:
+      - "8025:8025" # Web UI dashboard to read emails
+      - "1025:1025" # SMTP Port the NodeJS app sends mails to
+    networks:
+      - app-network
+
+# Global declarations ensuring data persistence and network isolation
+volumes:
+  mariadbdata: # This matches the volume name used in the mariadb service above
+
+networks:
+  app-network:
+    driver: bridge
